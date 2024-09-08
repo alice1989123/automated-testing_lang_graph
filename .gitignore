@@ -1,0 +1,100 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+#generatedcode
+
+code/
+
+# C extensions
+*.so
+
+# Packages
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environments
+venv/
+ENV/
+env/
+.venv/
+.venv/*
+venv.bak/
+venv.bak/*
+.env
+
+# Pyenv
+.python-version
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+*.iml
+
+# Spyder project settings
+.spyderproject
+.spyderworkspace
+
+# Virtualenv
+.Python
+env/
+venv/
+ENV/
+
+# macOS
+.DS_Store
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pytest
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Profiling data
+.prof
+
+# Docker
+*.dockerfile
+Dockerfile
+
+# Pyre type checker
+.pyre/
+
+# dotenv
+.env
