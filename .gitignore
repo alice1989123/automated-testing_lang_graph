@@ -6,7 +6,7 @@ __pycache__/
 
 #generatedcode
 
-code/
+code/*
 
 # C extensions
 *.so
