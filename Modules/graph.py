@@ -15,7 +15,7 @@ from langgraph.graph import END, StateGraph, START
 from typing import List, TypedDict
 import contextlib
 import io
-
+import sys
 
 max_iterations = 3
 # Reflect
@@ -23,7 +23,21 @@ max_iterations = 3
 flag = "do not reflect"
 
 model = "gpt-4o-mini-2024-07-18"
+class GraphState(TypedDict):
+    """
+    Represents the state of our graph.
 
+    Attributes:
+        error : Binary flag for control flow to indicate whether test error was tripped
+        messages : With user question, error messages, reasoning
+        generation : Code solution
+        iterations : Number of tries
+    """
+
+    error: str
+    messages: List
+    generation: str
+    iterations: int
 
 
 
@@ -71,214 +85,206 @@ loader = RecursiveUrlLoader(
 docs = loader.load()
 
 # Sort the list based on the URLs and get the text
-d_sorted = sorted(docs, key=lambda x: x.metadata["source"])
-d_reversed = list(reversed(d_sorted))
-concatenated_content = "\n\n\n --- \n\n\n".join(
-    [doc.page_content for doc in d_reversed]
-)
-
-
-class GraphState(TypedDict):
-    """
-    Represents the state of our graph.
-
-    Attributes:
-        error : Binary flag for control flow to indicate whether test error was tripped
-        messages : With user question, error messages, reasoning
-        generation : Code solution
-        iterations : Number of tries
-    """
-
-    error: str
-    messages: List
-    generation: str
-    iterations: int
+#d_sorted = sorted(docs, key=lambda x: x.metadata["source"])
+#d_reversed = list(reversed(d_sorted))
 
 
 
-def generate(state: GraphState ):
-   
-    """
-    Generate a code solution
 
-    Args:
-        state (dict): The current graph state
+class TestGenerator ( ):
+    def __init__(self , concatenated_content :str , root_directory:str , module_name:str):
+        self.concatenated_content = concatenated_content
+        self.root_directory = root_directory
+        self.module_name = module_name
+    def generate( self, state: GraphState ):
+    
+        """
+        Generate a code solution
 
-    Returns:
-        state (dict): New key added to state, generation
-    """
+        Args:
+            state (dict): The current graph state
 
-    print("---GENERATING CODE SOLUTION---")
+        Returns:
+            state (dict): New key added to state, generation
+        """
 
-    # State
-    messages = state["messages"]
-    iterations = state["iterations"]
-    error = state["error"]
-    print(messages)
+        print("---GENERATING UNITARY TEST---")
 
-    # We have been routed back to generation with an error
-    if error == "yes":
+        # State
+        messages = state["messages"]
+        iterations = state["iterations"]
+        error = state["error"]
+        print(messages)
+
+        # We have been routed back to generation with an error
+        if error == "yes":
+            messages += [
+                (
+                    "user",
+                    "Now, try again. Invoke the code tool to structure the output with a prefix, imports, and code block:",
+                )
+            ]
+
+        # Solution
+        code_solution = code_gen_chain.invoke(
+            {"context": self.concatenated_content, "messages": messages}
+        )
         messages += [
             (
-                "user",
-                "Now, try again. Invoke the code tool to structure the output with a prefix, imports, and code block:",
+                "assistant",
+                f"{code_solution.prefix} \n Imports: {code_solution.imports} \n Code: {code_solution.code}",
             )
         ]
 
-    # Solution
-    code_solution = code_gen_chain.invoke(
-        {"context": concatenated_content, "messages": messages}
-    )
-    messages += [
-        (
-            "assistant",
-            f"{code_solution.prefix} \n Imports: {code_solution.imports} \n Code: {code_solution.code}",
+        # Increment
+        iterations = iterations + 1
+        return {"generation": code_solution, "messages": messages, "iterations": iterations}
+
+    def code_check(self, state: GraphState):
+        """
+        Check code
+
+        Args:
+            state (dict): The current graph state
+s
+        Returns:
+            state (dict): New key added to state, error
+        """
+
+        print("---CHECKING CODE---")
+
+        # State
+        messages = state["messages"]
+        code_solution = state["generation"]
+        iterations = state["iterations"]
+
+        # Get solution components
+        imports = code_solution.imports
+        code = code_solution.code
+
+        # Check imports
+        # Open a file for writing
+
+        if self.root_directory not in sys.path:
+            sys.path.append(self.root_directory)
+
+        output_folder = f"/home/alice/automatedTesting/code/{self.module_name}/"
+        os.makedirs(output_folder, exist_ok=True)
+        captured_output = ""
+        output_buffer = io.StringIO()
+        os.chdir(self.root_directory)
+
+        
+        with open(output_folder + f"{self.module_name}_test_{state['iterations']}.py", 'w') as file:
+            # Write the string to the file
+            file.write(  imports + "\n" + code)
+        try:
+            exec(imports)
+        except Exception as e:
+            print("---CODE IMPORT CHECK: FAILED---")
+            error_message = [("user", f"Your solution failed the import test: {e}")]
+            messages += error_message
+            return {
+                "generation": code_solution,
+                "messages": messages,
+                "iterations": iterations,
+                "error": "yes",
+            }
+
+                    # Check execution
+                # Use redirect_stdout to capture print output from exec()
+        try:
+        # Use redirect_stdout to capture print output from exec()
+            output_buffer = io.StringIO()
+
+            with contextlib.redirect_stdout(output_buffer):
+                exec(imports + "\n" + code)
+
+                # Get the output captured in the buffer
+            captured_output = output_buffer.getvalue()
+
+
+                # Save the captured output to a file
+            with open(output_folder + f"execution_{state['iterations']}._result_.txt", 'w') as file:
+                    file.write(captured_output)
+
+            print("Execution output saved to!" , output_folder + f"execution_{state['iterations']}._result_.txt")
+        
+        except Exception as e:
+            print("---CODE BLOCK CHECK: FAILED---")
+            error_message = [("user", f"Your solution failed the code execution test: {e}")]
+            messages = []  # Initialize messages if needed
+            messages += error_message
+
+            # Return your desired result dictionary
+            result = {
+                "generation": "code_solution_placeholder",  # Replace with your actual code solution
+                "messages": messages,
+                "iterations": state["iterations"],
+                "error": "yes",
+            }
+            print(result)
+
+            # No errors
+            print("---NO CODE TEST FAILURES---")
+            return {
+                "generation": code_solution,
+                "messages": messages,
+                "iterations": iterations,
+                "error": "no",
+            }
+
+
+    def reflect(state: GraphState , code_gen_chain , concatenated_content):
+        """
+        Reflect on errors
+
+        Args:
+            state (dict): The current graph state
+
+        Returns:
+            state (dict): New key added to state, generation
+        """
+
+        print("---GENERATING CODE SOLUTION---")
+
+        # State
+        messages = state["messages"]
+        iterations = state["iterations"]
+        code_solution = state["generation"]
+
+        # Prompt reflection
+
+        # Add reflection
+        reflections = code_gen_chain.invoke(
+            {"context": concatenated_content, "messages": messages}
         )
-    ]
-
-    # Increment
-    iterations = iterations + 1
-    return {"generation": code_solution, "messages": messages, "iterations": iterations}
+        messages += [("assistant", f"Here are reflections on the error: {reflections}")]
+        return {"generation": code_solution, "messages": messages, "iterations": iterations}
 
 
-def code_check(state: GraphState):
-    """
-    Check code
-
-    Args:
-        state (dict): The current graph state
-
-    Returns:
-        state (dict): New key added to state, error
-    """
-
-    print("---CHECKING CODE---")
-
-    # State
-    messages = state["messages"]
-    code_solution = state["generation"]
-    iterations = state["iterations"]
-
-    # Get solution components
-    imports = code_solution.imports
-    code = code_solution.code
-
-    # Check imports
-    # Open a file for writing
-
-    file_path = f"/home/alice/automatedTesting/code/"
-
-    
-    with open(file_path + f"iteration_{state['iterations']}.py", 'w') as file:
-        # Write the string to the file
-        test =  imports + "\n" + code
-        file.write(  imports + "\n" + code)
-    try:
-        exec(imports)
-    except Exception as e:
-        print("---CODE IMPORT CHECK: FAILED---")
-        error_message = [("user", f"Your solution failed the import test: {e}")]
-        messages += error_message
-        return {
-            "generation": code_solution,
-            "messages": messages,
-            "iterations": iterations,
-            "error": "yes",
-        }
-
-                # Check execution
-    output_buffer = io.StringIO()
-            # Use redirect_stdout to capture print output from exec()
-    try:
-    # Use redirect_stdout to capture print output from exec()
-        with contextlib.redirect_stdout(output_buffer):
-            exec(imports + "\n" + code)
-
-        # Get the output captured in the buffer
-        captured_output = output_buffer.getvalue()
+    ### Edges
 
 
-        # Save the captured output to a file
-        with open(file_path + f"iteration_{state['iterations']}_execution.txt", 'w') as file:
-            file.write(captured_output)
+    def decide_to_finish(self , state: GraphState ):
+        """
+        Determines whether to finish.
 
-        print("Execution output saved successfully!")
-    
-    except Exception as e:
-        print("---CODE BLOCK CHECK: FAILED---")
-        error_message = [("user", f"Your solution failed the code execution test: {e}")]
-        messages = []  # Initialize messages if needed
-        messages += error_message
+        Args:
+            state (dict): The current graph state
 
-        # Return your desired result dictionary
-        result = {
-            "generation": "code_solution_placeholder",  # Replace with your actual code solution
-            "messages": messages,
-            "iterations": state["iterations"],
-            "error": "yes",
-        }
-        print(result)
+        Returns:
+            str: Next node to call
+        """
+        error = state["error"]
+        iterations = state["iterations"]
 
-        # No errors
-        print("---NO CODE TEST FAILURES---")
-        return {
-            "generation": code_solution,
-            "messages": messages,
-            "iterations": iterations,
-            "error": "no",
-        }
-
-
-def reflect(state: GraphState , code_gen_chain , concatenated_content):
-    """
-    Reflect on errors
-
-    Args:
-        state (dict): The current graph state
-
-    Returns:
-        state (dict): New key added to state, generation
-    """
-
-    print("---GENERATING CODE SOLUTION---")
-
-    # State
-    messages = state["messages"]
-    iterations = state["iterations"]
-    code_solution = state["generation"]
-
-    # Prompt reflection
-
-    # Add reflection
-    reflections = code_gen_chain.invoke(
-        {"context": concatenated_content, "messages": messages}
-    )
-    messages += [("assistant", f"Here are reflections on the error: {reflections}")]
-    return {"generation": code_solution, "messages": messages, "iterations": iterations}
-
-
-### Edges
-
-
-def decide_to_finish(state: GraphState ):
-    """
-    Determines whether to finish.
-
-    Args:
-        state (dict): The current graph state
-
-    Returns:
-        str: Next node to call
-    """
-    error = state["error"]
-    iterations = state["iterations"]
-
-    if error == "no" or iterations == max_iterations:
-        print("---DECISION: FINISH---")
-        return "end"
-    else:
-        print("---DECISION: RE-TRY SOLUTION---")
-        if flag == "reflect":
-            return "reflect"
+        if error == "no" or iterations == max_iterations:
+            print("---DECISION: FINISH---")
+            return "end"
         else:
-            return "generate"
+            print("---DECISION: RE-TRY SOLUTION---")
+            if flag == "reflect":
+                return "reflect"
+            else:
+                return "generate"
